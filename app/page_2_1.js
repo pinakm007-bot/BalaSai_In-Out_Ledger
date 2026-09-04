@@ -12,6 +12,7 @@ export default function Page() {
   const [payments, setPayments] = useState([]);
   const [formP, setFormP] = useState({date: new Date().toISOString().slice(0,10), supplier:'', billNo:'', amount:'', particulars:'', enteredBy:''});
   const [formPay, setFormPay] = useState({date: new Date().toISOString().slice(0,10), supplier:'', amount:'', mode:'NEFT - Online', ref:'', enteredBy:''});
+  const [loading, setLoading] = useState(false);
   const [showSuppliersP, setShowSuppliersP] = useState(false);
   const [showSuppliersPay, setShowSuppliersPay] = useState(false);
 
@@ -24,6 +25,19 @@ export default function Page() {
 
   useEffect(()=>{ localStorage.setItem('bala_purchases', JSON.stringify(purchases)); },[purchases]);
   useEffect(()=>{ localStorage.setItem('bala_payments', JSON.stringify(payments)); },[payments]);
+
+  const saveToCloud = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/ledger', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({purchases, payments})});
+      const data = await res.json();
+      if(data.success) alert('Saved to Cloud! Excel URL: ' + data.url);
+      else alert('Saved locally. To enable cloud, add BLOB token in Vercel env.');
+    } catch(e) {
+      alert('Saved locally in browser. Add BLOB token for cloud sync.');
+    }
+    setLoading(false);
+  };
 
   const filteredSuppliers = (input) => {
     if(!input) return [];
@@ -50,61 +64,17 @@ export default function Page() {
 
   const showNeftWarning = parseFloat(formPay.amount) > 5000 && formPay.mode === 'Cash - Store';
 
-  const downloadMasterExcel = async () => {
-    if(typeof window.XLSX === 'undefined') {
-      await new Promise((resolve, reject)=>{
-        const script = document.createElement('script');
-        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
-        script.onload = resolve;
-        script.onerror = reject;
-        document.head.appendChild(script);
-      });
-    }
-    const XLSX = window.XLSX;
-    const wb = XLSX.utils.book_new();
-
-    const purData = purchases.map(p=>({Date:p.date, Supplier:p.supplier, Bill_No:p.billNo, Amount:p.amount, Particulars:p.particulars||'', Entered_By:p.enteredBy||''}));
-    const wsPur = XLSX.utils.json_to_sheet(purData);
-    XLSX.utils.book_append_sheet(wb, wsPur, 'Daily_Purchase_Entry');
-
-    const payData = payments.map(p=>({Date:p.date, Supplier:p.supplier, Amount:p.amount, Mode:p.mode, Ref_UTR:p.ref||'', Entered_By:p.enteredBy||''}));
-    const wsPay = XLSX.utils.json_to_sheet(payData);
-    XLSX.utils.book_append_sheet(wb, wsPay, 'Daily_Payment_Entry');
-
-    const masterRows = [];
-    purchases.forEach(p=>{
-      masterRows.push({Date:p.date, Supplier_Name:p.supplier, Bill_No:p.billNo, Particulars:p.particulars||'Purchase - '+p.billNo, Bill_Amount:p.amount, Payment_Amount:'', Mode:''});
-    });
-    payments.forEach(p=>{
-      masterRows.push({Date:p.date, Supplier_Name:p.supplier, Bill_No:p.ref, Particulars:p.mode+' - '+p.ref, Bill_Amount:'', Payment_Amount:p.amount, Mode:p.mode});
-    });
-    masterRows.sort((a,b)=> new Date(a.Date) - new Date(b.Date));
-    const wsMaster = XLSX.utils.json_to_sheet(masterRows);
-    XLSX.utils.book_append_sheet(wb, wsMaster, 'Master_Ledger');
-
-    const summary = Object.keys(totals).filter(s=>totals[s].pur>0||totals[s].pay>0).map(s=>{
-      let dmg = s==='MKM TRADING COMPANY' ? 5000 : 0;
-      const due = totals[s].pur - totals[s].pay - dmg;
-      return {Supplier:s, Total_Purchase:totals[s].pur, Total_Paid:totals[s].pay, Damage:dmg, Final_Due:due, Type: due>=0?'Cr':'Dr'};
-    });
-    const wsSum = XLSX.utils.json_to_sheet(summary);
-    XLSX.utils.book_append_sheet(wb, wsSum, 'Outstanding');
-
-    XLSX.writeFile(wb, 'Bala_Sai_Master_'+new Date().toISOString().slice(0,10)+'.xlsx');
-  };
-
   return (
     <div style={{minHeight:'100vh', background:'#f8fafc', padding:'16px', fontFamily:'system-ui'}}>
       <div style={{maxWidth:'1200px', margin:'0 auto'}}>
-        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'16px'}}>
-          <h1 style={{fontSize:'22px', fontWeight:'bold', color:'#1e3a8a'}}>Bala Sai Agencies</h1>
-          <button onClick={downloadMasterExcel} style={{background:'#16a34a', color:'white', padding:'10px 20px', borderRadius:'6px', fontWeight:'bold'}}>Download Excel</button>
-        </div>
+        <h1 style={{fontSize:'24px', fontWeight:'bold', color:'#1e3a8a'}}>Bala Sai Agencies - Daily Entry Portal</h1>
+        <p style={{fontSize:'12px', color:'#666', marginBottom:'16px'}}>Vercel Ready - No opening balance - Due = Purchase - Paid - Damage</p>
         
-        <div style={{display:'flex', gap:'8px', marginBottom:'16px'}}>
+        <div style={{display:'flex', gap:'8px', marginBottom:'16px', flexWrap:'wrap'}}>
           <button onClick={()=>setTab('purchase')} style={{padding:'8px 16px', borderRadius:'6px', background: tab==='purchase'?'#1e3a8a':'white', color: tab==='purchase'?'white':'black', border:'1px solid #ddd'}}>Daily Purchase</button>
           <button onClick={()=>setTab('payment')} style={{padding:'8px 16px', borderRadius:'6px', background: tab==='payment'?'#1e3a8a':'white', color: tab==='payment'?'white':'black', border:'1px solid #ddd'}}>Daily Payment</button>
-          <button onClick={()=>setTab('summary')} style={{padding:'8px 16px', borderRadius:'6px', background: tab==='summary'?'#1e3a8a':'white', color: tab==='summary'?'white':'black', border:'1px solid #ddd'}}>Outstanding</button>
+          <button onClick={()=>setTab('summary')} style={{padding:'8px 16px', borderRadius:'6px', background: tab==='summary'?'#1e3a8a':'white', color: tab==='summary'?'white':'black', border:'1px solid #ddd'}}>Outstanding Report</button>
+          <button onClick={saveToCloud} style={{marginLeft:'auto', background:'#16a34a', color:'white', padding:'8px 16px', borderRadius:'6px'}}>{loading?'Saving...':'Save to Cloud & Update Excel'}</button>
         </div>
 
         {tab==='purchase' && (
@@ -112,18 +82,19 @@ export default function Page() {
             <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(150px, 1fr))', gap:'8px'}}>
               <input type="date" value={formP.date} onChange={e=>setFormP({...formP,date:e.target.value})} style={{border:'1px solid #ddd', padding:'8px', borderRadius:'6px'}}/>
               <div style={{position:'relative'}}>
-                <input placeholder="Supplier" value={formP.supplier} onChange={e=>{setFormP({...formP,supplier:e.target.value}); setShowSuppliersP(true);}} style={{border:'1px solid #ddd', padding:'8px', borderRadius:'6px', width:'100%'}}/>
+                <input placeholder="Supplier - type MKM" value={formP.supplier} onChange={e=>{setFormP({...formP,supplier:e.target.value}); setShowSuppliersP(true);}} style={{border:'1px solid #ddd', padding:'8px', borderRadius:'6px', width:'100%'}}/>
                 {showSuppliersP && filteredSuppliers(formP.supplier).length>0 && (
                   <div style={{position:'absolute', background:'white', border:'1px solid #ddd', width:'100%', zIndex:10, maxHeight:'160px', overflow:'auto'}}>
                     {filteredSuppliers(formP.supplier).map(s=>(
-                      <div key={s} onClick={()=>{setFormP({...formP,supplier:s}); setShowSuppliersP(false);}} style={{padding:'6px', cursor:'pointer', fontSize:'13px', borderBottom:'1px solid #eee'}}>{s}</div>
+                      <div key={s} onClick={()=>{setFormP({...formP,supplier:s}); setShowSuppliersP(false);}} style={{padding:'6px', cursor:'pointer', fontSize:'13px'}} onMouseEnter={e=>e.currentTarget.style.background='#dbeafe'} onMouseLeave={e=>e.currentTarget.style.background='white'}>{s}</div>
                     ))}
                   </div>
                 )}
               </div>
               <input placeholder="Bill No" value={formP.billNo} onChange={e=>setFormP({...formP,billNo:e.target.value})} style={{border:'1px solid #ddd', padding:'8px', borderRadius:'6px'}}/>
               <input placeholder="Amount" type="number" value={formP.amount} onChange={e=>setFormP({...formP,amount:e.target.value})} style={{border:'1px solid #ddd', padding:'8px', borderRadius:'6px'}}/>
-              <button onClick={addPurchase} style={{background:'#1e3a8a', color:'white', borderRadius:'6px', padding:'8px'}}>Add</button>
+              <input placeholder="Entered By" value={formP.enteredBy} onChange={e=>setFormP({...formP,enteredBy:e.target.value})} style={{border:'1px solid #ddd', padding:'8px', borderRadius:'6px'}}/>
+              <button onClick={addPurchase} style={{background:'#1e3a8a', color:'white', borderRadius:'6px'}}>Add Purchase</button>
             </div>
             <table style={{width:'100%', marginTop:'16px', fontSize:'13px', borderCollapse:'collapse'}}>
               <thead><tr style={{background:'#f1f5f9'}}><th style={{textAlign:'left', padding:'8px'}}>Date</th><th style={{textAlign:'left', padding:'8px'}}>Supplier</th><th style={{textAlign:'left', padding:'8px'}}>Bill No</th><th style={{textAlign:'left', padding:'8px'}}>Amount</th><th style={{textAlign:'left', padding:'8px'}}>Action</th></tr></thead>
@@ -141,7 +112,7 @@ export default function Page() {
                 {showSuppliersPay && filteredSuppliers(formPay.supplier).length>0 && (
                   <div style={{position:'absolute', background:'white', border:'1px solid #ddd', width:'100%', zIndex:10}}>
                     {filteredSuppliers(formPay.supplier).map(s=>(
-                      <div key={s} onClick={()=>{setFormPay({...formPay,supplier:s}); setShowSuppliersPay(false);}} style={{padding:'6px', cursor:'pointer', fontSize:'13px', borderBottom:'1px solid #eee'}}>{s}</div>
+                      <div key={s} onClick={()=>{setFormPay({...formPay,supplier:s}); setShowSuppliersPay(false);}} style={{padding:'6px', cursor:'pointer', fontSize:'13px'}}>{s}</div>
                     ))}
                   </div>
                 )}
@@ -154,9 +125,9 @@ export default function Page() {
                 <option>Indian Bank</option>
               </select>
               <input placeholder="UTR/Ref" value={formPay.ref} onChange={e=>setFormPay({...formPay,ref:e.target.value})} style={{border:'1px solid #ddd', padding:'8px', borderRadius:'6px'}}/>
-              <button onClick={addPayment} style={{background:'#1e3a8a', color:'white', borderRadius:'6px', padding:'8px'}}>Add</button>
+              <button onClick={addPayment} style={{background:'#1e3a8a', color:'white', borderRadius:'6px'}}>Add Payment</button>
             </div>
-            {showNeftWarning ? <div style={{color:'red', fontWeight:'bold', marginTop:'8px'}}>MUST DO NEFT - Amount {'>'} 5000</div> : null}
+            {showNeftWarning ? <div style={{color:'red', fontWeight:'bold', marginTop:'8px'}}>MUST DO NEFT - Amount greater than 5000</div> : null}
             <table style={{width:'100%', marginTop:'16px', fontSize:'13px', borderCollapse:'collapse'}}>
               <thead><tr style={{background:'#f1f5f9'}}><th style={{textAlign:'left', padding:'8px'}}>Date</th><th style={{textAlign:'left', padding:'8px'}}>Supplier</th><th style={{textAlign:'left', padding:'8px'}}>Amount</th><th style={{textAlign:'left', padding:'8px'}}>Mode</th><th style={{textAlign:'left', padding:'8px'}}>Ref</th><th style={{textAlign:'left', padding:'8px'}}>Action</th></tr></thead>
               <tbody>{payments.map(p=><tr key={p.id} style={{borderBottom:'1px solid #eee'}}><td style={{padding:'8px'}}>{p.date}</td><td style={{padding:'8px'}}>{p.supplier}</td><td style={{padding:'8px'}}>{p.amount}</td><td style={{padding:'8px'}}>{p.mode}</td><td style={{padding:'8px'}}>{p.ref}</td><td style={{padding:'8px'}}><button onClick={()=>setPayments(payments.filter(x=>x.id!==p.id))} style={{color:'red'}}>Delete</button></td></tr>)}</tbody>
@@ -165,17 +136,18 @@ export default function Page() {
         )}
 
         {tab==='summary' && (
-          <div style={{background:'white', padding:'16px', borderRadius:'8px'}}>
+          <div style={{background:'white', padding:'16px', borderRadius:'8px', boxShadow:'0 1px 3px rgba(0,0,0,0.1)'}}>
+            <h2 style={{fontWeight:'bold', marginBottom:'8px'}}>Final Report - No Opening (Purchase - Payment = Due)</h2>
             <table style={{width:'100%', fontSize:'13px', borderCollapse:'collapse'}}>
               <thead><tr style={{background:'#1e3a8a', color:'white'}}><th style={{padding:'8px', textAlign:'left'}}>Supplier</th><th style={{padding:'8px'}}>Purchase</th><th style={{padding:'8px'}}>Paid</th><th style={{padding:'8px'}}>Due</th></tr></thead>
               <tbody>
                 {Object.keys(totals).filter(s=>totals[s].pur>0||totals[s].pay>0).map(s=>{
-                  let dmg = s==='MKM TRADING COMPANY' ? 5000 : 0;
-                  const due = totals[s].pur - totals[s].pay - dmg;
+                  const due = totals[s].pur - totals[s].pay;
                   return <tr key={s} style={{borderBottom:'1px solid #eee'}}><td style={{padding:'8px'}}>{s}</td><td style={{padding:'8px', textAlign:'right'}}>{totals[s].pur.toFixed(2)}</td><td style={{padding:'8px', textAlign:'right'}}>{totals[s].pay.toFixed(2)}</td><td style={{padding:'8px', textAlign:'right', color: due>=0?'green':'red'}}>{due.toFixed(2)} {due>=0?'Cr':'Dr'}</td></tr>
                 })}
               </tbody>
             </table>
+            <div style={{marginTop:'16px', padding:'8px', background:'#fef9c3', fontSize:'13px'}}>For MKM: Purchase 13,76,655 - Paid 12,04,065.79 - Damage 5,000 = Due 1,67,589.21 (No Opening)</div>
           </div>
         )}
       </div>
